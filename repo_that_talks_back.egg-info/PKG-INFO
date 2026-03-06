@@ -1,0 +1,202 @@
+Metadata-Version: 2.4
+Name: repo-that-talks-back
+Version: 0.1.0
+Summary: Turn any GitHub repository into an interactive assistant with file+line citations.
+Author: Repo That Talks Back Contributors
+License: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: pydantic>=2.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: httpx; extra == "dev"
+
+# Repo That Talks Back
+
+Turn any GitHub repository into an interactive assistant that answers questions
+with **file + line citations**, and can generate PR diffs for small changes.
+
+## What makes it different
+
+- **Citations or refusal.** Every answer includes `file:start-end` citations
+  grounding it in the actual codebase. If the evidence is insufficient, the
+  system explicitly refuses instead of hallucinating.
+- **Runs for free.** No paid APIs. Local inference is optional (stub adapter
+  included for future LLM integration). Works fully offline after cloning.
+- **Offline index.** The JSONL index is stored locally -- no cloud dependencies.
+- **GitHub URL support.** Pass a GitHub URL and it shallow-clones into a local
+  cache (`--depth 1`). Cached clones are reused automatically.
+- **Explain Repo.** One command to get a structured overview: what it is, how
+  to run it, key directories, entry points, architecture graph, and a
+  suggested reading order -- all with citations.
+- **Patch generation.** Ask it to add logging or TODOs and get a clean unified
+  diff you can review and apply.
+
+## Quickstart
+
+```bash
+# Clone and install
+git clone https://github.com/your-org/repo-that-talks-back.git
+cd repo-that-talks-back
+pip install -e ".[dev]"
+
+# Index a local repo
+python -m rtalk index --repo . --out .rtalk/index.jsonl
+
+# Index a GitHub repo (shallow clone)
+python -m rtalk index --repo https://github.com/owner/repo --out .rtalk/index.jsonl
+
+# Re-clone (bypass cache)
+python -m rtalk index --repo https://github.com/owner/repo --out .rtalk/index.jsonl --refresh
+
+# Ask a question
+python -m rtalk ask --index .rtalk/index.jsonl "How does the retrieval engine rank results?"
+
+# Get a full repo overview
+python -m rtalk explain --index .rtalk/index.jsonl
+
+# Start the web UI
+python -m rtalk serve
+# Then open http://127.0.0.1:8000
+```
+
+## Demo
+
+Run the included demo script:
+
+```bash
+bash scripts/demo.sh
+```
+
+This indexes the current repo, generates an overview, runs a sample query, and
+prints results with citations.
+
+## Example: Explain Repo output
+
+```
+============================================================
+  REPO OVERVIEW
+============================================================
+
+## What this repo is
+Repo That Talks Back: Turn any GitHub repository into an interactive assistant...
+  Citations: README.md:1-80
+
+## How to run
+  $ pip install -e ".[dev]"
+  $ python -m rtalk index --repo . --out .rtalk/index.jsonl
+  Citations: README.md:1-80
+
+## Key Directories
+  rtalk/ (8 files: .py) - Python package (8 .py files)
+  tests/ (6 files: .py) - Python package (6 .py files)
+  web/ (1 files: .html) - Contains .html files
+
+## Entry Points
+  [main_block] rtalk/__main__.py:65 - Main entry block
+  [fastapi_app] rtalk/server.py:22 - FastAPI application
+
+## Architecture (top central modules)
+  os (imported by 5 modules)
+  rtalk (imported by 4 modules)
+
+## Start Here (suggested reading order)
+  1. README.md - Start here for project overview and setup instructions.
+  2. pyproject.toml - Project configuration, dependencies, and build metadata.
+  3. rtalk/__main__.py - Entry point (main_block)
+  4. rtalk/server.py - Entry point (fastapi_app)
+```
+
+## Project structure
+
+```
+repo-that-talks-back/
+  rtalk/
+    __init__.py          # Package init
+    __main__.py          # CLI entry point (index, ask, explain, serve)
+    models.py            # Shared data models
+    clone.py             # GitHub URL detection and shallow clone with caching
+    index.py             # CLI indexer (file scanning, chunking, AST symbols)
+    retrieval.py         # Retrieval engine (TF-IDF + exact + intent detection)
+    explain.py           # Repo overview (directories, entrypoints, import graph)
+    answer.py            # Answering engine (deterministic templates + LLM stub)
+    patch.py             # Patch generator (AST-based transforms, unified diffs)
+    server.py            # FastAPI server
+  web/
+    index.html           # Web UI (mode selector: Ask / Explain / Patch)
+  tests/
+    test_index.py        # Indexer tests
+    test_retrieval.py    # Retrieval + intent + boosting + dedup tests
+    test_answer.py       # Answer engine tests
+    test_patch.py        # Patch generator tests
+    test_clone.py        # Clone module tests (URL detection, caching)
+    test_explain.py      # Explain module tests (fixture repo)
+  scripts/
+    demo.sh              # One-click demo script
+  .github/
+    workflows/
+      ci.yml             # GitHub Actions CI
+  pyproject.toml         # Project metadata and dependencies
+  README.md              # This file
+```
+
+## API Endpoints
+
+Start the server with `uvicorn rtalk.server:app --reload`, then visit
+`http://127.0.0.1:8000/docs` for interactive API docs.
+
+| Method | Path      | Description                              |
+|--------|-----------|------------------------------------------|
+| POST   | /index    | Index a repo (local path or GitHub URL)  |
+| POST   | /search   | Search for evidence snippets             |
+| POST   | /answer   | Get a grounded answer (auto-routes to explain for broad queries) |
+| POST   | /explain  | Get a structured repo overview           |
+| POST   | /patch    | Generate a unified diff                  |
+| GET    | /         | Web UI                                   |
+
+## How it works
+
+1. **Clone (optional)** detects GitHub URLs, shallow-clones into
+   `.rtalk/repos/<owner>__<repo>__<hash>/`, and caches for reuse.
+
+2. **Indexer** scans tracked files (respects `.gitignore`), chunks them into
+   80-line segments, and extracts Python symbols (functions, classes, imports)
+   using the `ast` module. Output: a JSONL file.
+
+3. **Retrieval** runs TF-IDF over chunks with filename and symbol boosting,
+   plus exact substring search (ripgrep if installed, pure-Python fallback).
+   Includes query intent detection -- broad questions like "explain this repo"
+   are automatically routed to the explain flow.
+
+4. **Answering** takes the query + evidence and produces a structured response:
+   summary, citation list, grounded explanation. If evidence is empty or
+   irrelevant, it refuses with guidance on what to check.
+
+5. **Explain** inspects the index to produce a structured report: what the repo
+   is (from README), how to run it, key directories, detected entry points
+   (`__main__`, FastAPI, Flask, Click, Typer), a module import graph, and a
+   suggested reading order.
+
+6. **Patch generator** uses Python AST to locate functions and apply safe
+   transforms (insert logging, add TODO comments), outputting unified diffs.
+
+## Running tests
+
+```bash
+pytest -v
+```
+
+## Roadmap
+
+- [ ] **GitHub Action** -- index on push, answer questions in PR comments
+- [ ] **tree-sitter** -- multi-language symbol extraction (JS, TS, Go, Rust)
+- [ ] **Local LLM** -- integrate Ollama or llama.cpp via the `LLMAdapter` interface
+- [ ] **Semantic search** -- embed chunks with a local model for vector similarity
+- [ ] **Multi-repo** -- index and cross-reference multiple repositories
+- [ ] **Streaming answers** -- SSE endpoint for real-time answer generation
+
+## License
+
+MIT
