@@ -1,5 +1,8 @@
 # Repo That Talks Back v2
 
+<img width="1465" height="831" alt="image" src="https://github.com/user-attachments/assets/31a8aa1b-148c-45bc-81b9-08301d625cd9" />
+
+
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-pytest-green?style=flat)](https://docs.pytest.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat)](https://opensource.org/licenses/MIT)
