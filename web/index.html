@@ -61,6 +61,10 @@
     .explain-domain-card .domain-deps{font-size:0.68rem;color:var(--text-muted);margin-top:0.2rem}
     .explain-domain-card .ai-badge{font-size:0.58rem;padding:0.06rem 0.35rem;margin-left:0.35rem;vertical-align:middle;background:var(--accent-dim);color:var(--accent);border:1px solid var(--border)}
     .ai-summary-block{font-size:0.72rem;color:var(--text-muted);margin-top:0.35rem;padding-top:0.35rem;border-top:1px solid var(--border)}
+    .explain-ai-body{font-size:0.78rem;line-height:1.6;color:var(--text)}
+    .explain-ai-body h3,.explain-ai-body h4{font-weight:600}
+    .explain-ai-body strong{color:var(--accent)}
+    .explain-ai-body code{font-size:0.74rem}
     .mode-tabs{display:flex;gap:0;margin-bottom:0.8rem;border:1px solid var(--border);overflow:hidden}
     .mode-tabs button{flex:1;border:none;border-radius:0;background:var(--code-bg);color:var(--text-muted);padding:0.42rem;font-size:0.72rem;cursor:pointer;transition:all 0.15s}
     .mode-tabs button:last-child{border-right:none}
@@ -173,19 +177,10 @@
   </div>
   <div id="mode-explain" class="mode-panel">
     <div class="panel"><h2>Explain This Repo</h2>
-    <p style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;">KT-style overview: what is where, what does what, how it connects. For engineers, PMs, UX, researchers.</p>
+    <p style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;">Detailed knowledge-transfer overview: what this repo does, how it works, where to start. Add a Groq API key for an AI-generated deep explanation.</p>
     <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-top:0.4rem">
       <button onclick="runExplain()">Generate Overview</button>
-      <label style="font-size:0.7rem;display:flex;align-items:center;gap:0.25rem"><input type="checkbox" id="explain-use-ai" onchange="el('explain-ai-hint').style.display=this.checked?'block':'none'" /> AI summaries</label>
-    </div>
-    <div id="explain-ai-hint" class="hint" style="margin-top:0.25rem;display:none">Add Groq API key in Repository panel above for AI summaries.</div></div>
-    <div id="explain-persona-tabs" class="viz-tabs" style="display:none;margin-top:0.5rem">
-      <button class="active" data-persona="all">All</button>
-      <button data-persona="pm">PM</button>
-      <button data-persona="engineer">Engineer</button>
-      <button data-persona="ux">UX</button>
-      <button data-persona="researcher">Researcher</button>
-    </div>
+    </div></div>
   </div>
 
   <!-- MAP -->
@@ -250,6 +245,7 @@
     <div id="issues-loading" class="status" style="margin-top:0.4rem;display:none"></div>
     <div id="issues-container" style="margin-top:0.6rem"></div>
   </div>
+  </div>
   <div id="mode-impact" class="mode-panel">
     <div class="panel"><h2>Impact Analysis</h2>
     <div class="row" style="flex-wrap:wrap;gap:0.4rem">
@@ -287,11 +283,14 @@ function showLoading(msg){const o=el('chart-loading');o.style.display='flex';el(
 function hideLoading(){el('chart-loading').style.display='none'}
 
 const modeNames=['ask','explain','map','guide','impact','issues'];
+let currentMode='ask';
+const tabResultsCache={};
 function switchMode(m){
+  tabResultsCache[currentMode]=el('results').innerHTML;
   document.querySelectorAll('.mode-tabs button').forEach((b,i)=>{b.classList.toggle('active',modeNames[i]===m)});
   modeNames.forEach(n=>el('mode-'+n).classList.toggle('active',n===m));
-  el('results').innerHTML='';
-  const pt=el('explain-persona-tabs');if(pt)pt.style.display=m==='explain'&&explainReportData?'flex':'none';
+  el('results').innerHTML=tabResultsCache[m]||'';
+  currentMode=m;
   if(m==='map') ensureGraphLoaded();
   if(m==='impact') updateImpactUI();
   if(m==='issues'&&!issuesData) runLoadIssues();
@@ -960,16 +959,14 @@ async function runAsk(){
   }catch(e){showError(e.message)}
 }
 let explainReportData=null;
-function renderExplainReport(rp,personaFilter){
-  const personaMatch=(personas)=>!personaFilter||personaFilter==='all'||(Array.isArray(personas)?personas.includes(personaFilter):personas===personaFilter||personas==='all');
+function renderExplainReport(rp){
   const container=document.createElement('div');
-  if(personaFilter&&personaFilter!=='all'&&rp.role_explanations&&rp.role_explanations[personaFilter]){
-    const roleSec=document.createElement('div');
-    roleSec.className='explain-section';
-    roleSec.style.borderLeft='3px solid var(--accent)';
-    roleSec.style.background='var(--accent-dim)';
-    roleSec.innerHTML=`<h3>For ${personaFilter.toUpperCase()} <span class="explain-persona-badge">${personaFilter}</span> <span class="ai-badge">AI</span></h3><div class="body" style="white-space:pre-wrap">${escapeHtml(rp.role_explanations[personaFilter])}</div>`;
-    container.appendChild(roleSec);
+  if(rp.ai_explanation){
+    const aiSec=document.createElement('div');aiSec.className='explain-section';
+    aiSec.style.borderLeft='3px solid var(--accent)';
+    aiSec.style.background='var(--accent-dim)';
+    aiSec.innerHTML=`<h3><span class="ai-badge">AI</span> Detailed Explanation</h3><div class="body explain-ai-body">${renderMarkdown(rp.ai_explanation)}</div>`;
+    container.appendChild(aiSec);
   }
   if(rp.at_a_glance){
     const ag=document.createElement('div');ag.className='explain-at-glance';
@@ -980,65 +977,38 @@ function renderExplainReport(rp,personaFilter){
       <div class="stat"><div class="val">${rp.at_a_glance.central_modules_count}</div><div class="lbl">Central Modules</div></div>`;
     container.appendChild(ag);
   }
-  if(personaMatch(rp.what?.persona||'all'))container.appendChild(renderExplainSection(rp.what));
-  if(personaMatch(rp.how_to_run?.persona||'all'))container.appendChild(renderExplainSection(rp.how_to_run));
-  if(personaMatch(['engineer'])&&rp.tech_stack&&rp.tech_stack.length){
+  container.appendChild(renderExplainSection(rp.what));
+  container.appendChild(renderExplainSection(rp.how_to_run));
+  if(rp.tech_stack&&rp.tech_stack.length){
     const sec=document.createElement('div');sec.className='explain-section';
-    const h3=document.createElement('h3');h3.textContent='Tech Stack';h3.innerHTML+=' <span class="explain-persona-badge">engineer</span>';sec.appendChild(h3);
+    const h3=document.createElement('h3');h3.textContent='Tech Stack';sec.appendChild(h3);
     const div=document.createElement('div');div.className='explain-tech-stack';
     rp.tech_stack.forEach(p=>{const c=document.createElement('span');c.className='chip';c.textContent=p;div.appendChild(c)});
     sec.appendChild(div);container.appendChild(sec);
   }
-  if(personaMatch(['pm'])&&rp.key_capabilities&&rp.key_capabilities.length){
+  if(rp.directories&&rp.directories.length){
     const sec=document.createElement('div');sec.className='explain-section';
-    const h3=document.createElement('h3');h3.textContent='Key Capabilities';h3.innerHTML+=' <span class="explain-persona-badge">pm</span>';sec.appendChild(h3);
-    const b=document.createElement('div');b.className='body';b.style.whiteSpace='pre-wrap';
-    b.textContent=rp.key_capabilities.map((c,i)=>`${i+1}. ${c}`).join('\n');
-    sec.appendChild(b);container.appendChild(sec);
-  }
-  if(personaMatch('all')&&rp.directories&&rp.directories.length){
-    const sec=document.createElement('div');sec.className='explain-section';
-    const h3=document.createElement('h3');h3.textContent='Key Directories';h3.innerHTML+=' <span class="explain-persona-badge">all</span>';sec.appendChild(h3);
+    const h3=document.createElement('h3');h3.textContent='Key Directories';sec.appendChild(h3);
     const b=document.createElement('div');b.className='body';b.style.whiteSpace='pre-wrap';
     b.textContent=rp.directories.map(d=>`${d.path}/ (${d.file_count} files) - ${d.description}`).join('\n');
-    sec.appendChild(b);
-    if(rp.directories_ai_summary){const ai=document.createElement('div');ai.className='ai-summary-block';ai.innerHTML=`<span class="ai-badge">AI</span> ${escapeHtml(rp.directories_ai_summary)}`;sec.appendChild(ai)}
-    container.appendChild(sec);
-  }
-  if(personaMatch(['ux'])&&(rp.ux_design_overview||rp.ux_design_ai_summary)){
-    const sec=document.createElement('div');sec.className='explain-section';
-    const h3=document.createElement('h3');h3.textContent='UX Design';h3.innerHTML+=' <span class="explain-persona-badge">ux</span>';sec.appendChild(h3);
-    if(rp.ux_design_overview){const b=document.createElement('div');b.className='body';b.style.whiteSpace='pre-wrap';b.textContent=rp.ux_design_overview;sec.appendChild(b)}
-    if(rp.ux_design_ai_summary){const ai=document.createElement('div');ai.className='ai-summary-block';ai.innerHTML=`<span class="ai-badge">AI</span> ${escapeHtml(rp.ux_design_ai_summary)}`;sec.appendChild(ai)}
-    container.appendChild(sec);
-  }
-  if(personaMatch(['engineer','ux'])&&rp.entrypoints&&rp.entrypoints.length){
-    const sec=document.createElement('div');sec.className='explain-section';
-    const h3=document.createElement('h3');h3.textContent='Entry Points';h3.innerHTML+=' <span class="explain-persona-badge">engineer</span> <span class="explain-persona-badge">ux</span>';sec.appendChild(h3);
-    const b=document.createElement('div');b.className='body';b.style.whiteSpace='pre-wrap';
-    b.textContent=rp.entrypoints.map(e=>`[${e.kind}] ${e.citation} - ${e.description}`).join('\n');
-    sec.appendChild(b);
-    if(rp.entrypoints_ai_summary){const ai=document.createElement('div');ai.className='ai-summary-block';ai.innerHTML=`<span class="ai-badge">AI</span> ${escapeHtml(rp.entrypoints_ai_summary)}`;sec.appendChild(ai)}
-    container.appendChild(sec);
-  }
-  if(personaMatch(['engineer','all'])&&rp.architecture_layers&&rp.architecture_layers.length){
-    const sec=document.createElement('div');sec.className='explain-section';
-    const h3=document.createElement('h3');h3.textContent='Architecture layers';h3.innerHTML+=' <span class="explain-persona-badge">engineer</span>';sec.appendChild(h3);
-    const b=document.createElement('div');b.className='body';b.style.whiteSpace='pre-wrap';
-    b.textContent=rp.architecture_layers.map(l=>`${l.name}: ${l.folders.join(', ')}`).join('\n');
     sec.appendChild(b);container.appendChild(sec);
   }
-  if(personaMatch(['engineer','all'])&&rp.architecture_narrative){
+  if(rp.entrypoints&&rp.entrypoints.length){
     const sec=document.createElement('div');sec.className='explain-section';
-    const h3=document.createElement('h3');h3.textContent='How it connects';sec.appendChild(h3);
-    const b=document.createElement('div');b.className='body';b.textContent=rp.architecture_narrative;
-    sec.appendChild(b);
-    if(rp.architecture_ai_summary){const ai=document.createElement('div');ai.className='ai-summary-block';ai.innerHTML=`<span class="ai-badge">AI</span> ${escapeHtml(rp.architecture_ai_summary)}`;sec.appendChild(ai)}
-    container.appendChild(sec);
+    const h3=document.createElement('h3');h3.textContent='Entry Points';sec.appendChild(h3);
+    const b=document.createElement('div');b.className='body';b.style.whiteSpace='pre-wrap';
+    b.textContent=rp.entrypoints.map(e=>`[${e.kind}] ${e.citation} - ${e.description}`).join('\n');
+    sec.appendChild(b);container.appendChild(sec);
   }
-  if(personaMatch(['all','engineer','pm'])&&rp.domains&&rp.domains.length){
+  if(rp.architecture_narrative){
     const sec=document.createElement('div');sec.className='explain-section';
-    const h3=document.createElement('h3');h3.textContent='Domains (KT overview)';h3.innerHTML+=' <span class="explain-persona-badge">all</span>';sec.appendChild(h3);
+    const h3=document.createElement('h3');h3.textContent='How It Connects';sec.appendChild(h3);
+    const b=document.createElement('div');b.className='body';b.textContent=rp.architecture_narrative;
+    sec.appendChild(b);container.appendChild(sec);
+  }
+  if(rp.domains&&rp.domains.length){
+    const sec=document.createElement('div');sec.className='explain-section';
+    const h3=document.createElement('h3');h3.textContent='Domains';sec.appendChild(h3);
     rp.domains.slice(0,12).forEach(d=>{
       const card=document.createElement('div');card.className='explain-domain-card';
       const aiBadge=d.is_ai_summary?' <span class="ai-badge">AI</span>':'';
@@ -1051,48 +1021,54 @@ function renderExplainReport(rp,personaFilter){
     });
     container.appendChild(sec);
   }
-  if(personaMatch(['engineer'])&&rp.architecture&&rp.architecture.central_modules&&rp.architecture.central_modules.length){
+  if(rp.architecture&&rp.architecture.central_modules&&rp.architecture.central_modules.length){
     const sec=document.createElement('div');sec.className='explain-section';
-    const h3=document.createElement('h3');h3.textContent='Top central modules';h3.innerHTML+=' <span class="explain-persona-badge">engineer</span>';sec.appendChild(h3);
+    const h3=document.createElement('h3');h3.textContent='Central Modules';sec.appendChild(h3);
     const b=document.createElement('div');b.className='body';b.style.whiteSpace='pre-wrap';
     b.textContent=rp.architecture.central_modules.map(m=>`${m.module} (imported by ${m.in_degree} modules)`).join('\n');
     sec.appendChild(b);container.appendChild(sec);
   }
   if(rp.start_here&&rp.start_here.length){
-    const filtered=rp.start_here.filter(s=>personaMatch(s?.persona||'all'));
-    if(filtered.length){
-      const sec=document.createElement('div');sec.className='explain-section';
-      const h3=document.createElement('h3');h3.textContent='Start Here (suggested reading order)';sec.appendChild(h3);
-      const b=document.createElement('div');b.className='body';b.style.whiteSpace='pre-wrap';
-      b.textContent=filtered.map((s,i)=>`${i+1}. ${s.title} - ${s.body}`).join('\n');
-      filtered.forEach((s,i)=>{if(s.ai_summary){const ai=document.createElement('div');ai.className='ai-summary-block';ai.style.marginTop='0.2rem';ai.innerHTML=`<span class="ai-badge">AI</span> ${i+1}. ${escapeHtml(s.ai_summary)}`;b.appendChild(ai)}});
-      sec.appendChild(b);
-      const cites=filtered.flatMap(s=>s.citations_top||s.citations||[]);
-      if(cites.length){const cl=document.createElement('div');cl.className='cite-list';cl.textContent='Citations: '+cites.slice(0,5).join(', ');sec.appendChild(cl)}
-      container.appendChild(sec);
-    }
+    const sec=document.createElement('div');sec.className='explain-section';
+    const h3=document.createElement('h3');h3.textContent='Start Here (suggested reading order)';sec.appendChild(h3);
+    const b=document.createElement('div');b.className='body';b.style.whiteSpace='pre-wrap';
+    b.textContent=rp.start_here.map((s,i)=>`${i+1}. ${s.title} - ${s.body}`).join('\n');
+    sec.appendChild(b);
+    const cites=rp.start_here.flatMap(s=>s.citations_top||s.citations||[]);
+    if(cites.length){const cl=document.createElement('div');cl.className='cite-list';cl.textContent='Citations: '+cites.slice(0,5).join(', ');sec.appendChild(cl)}
+    container.appendChild(sec);
   }
   return container;
 }
+function renderMarkdown(md){
+  return escapeHtml(md)
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/^### (.+)$/gm,'<h4 style="margin:0.6rem 0 0.2rem;color:var(--accent)">$1</h4>')
+    .replace(/^## (.+)$/gm,'<h3 style="margin:0.8rem 0 0.3rem;color:var(--accent)">$1</h3>')
+    .replace(/^# (.+)$/gm,'<h3 style="margin:0.8rem 0 0.3rem;color:var(--accent)">$1</h3>')
+    .replace(/^- (.+)$/gm,'<div style="padding-left:1rem;text-indent:-0.6rem">• $1</div>')
+    .replace(/^(\d+)\. (.+)$/gm,'<div style="padding-left:1rem;text-indent:-1rem">$1. $2</div>')
+    .replace(/`([^`]+)`/g,'<code style="background:var(--panel);padding:0.1rem 0.3rem;border-radius:3px;font-size:0.8em">$1</code>')
+    .replace(/\n/g,'<br>');
+}
 async function runExplain(){
-  const useAi=el('explain-use-ai')?.checked;
   const key=getGroqKey();
-  if(useAi&&!key){showError('Add your Groq API key in the Repository panel above to enable AI summaries.');return}
-  showLoadingStatus('Generating overview');
+  showLoadingStatus(key?'Generating AI overview':'Generating overview');
   try{
     const body={};if(projectState.indexPath)body.index_path=projectState.indexPath;
     if(projectState.repoLocal)body.repo_path=projectState.repoLocal;
-    if(useAi&&key){body.use_ai_summary=true;body.ai_api_key=key;}
+    if(key){body.use_ai_summary=true;body.ai_api_key=key;}
     const r=await fetch(API+'/explain',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await r.json();if(!r.ok)throw new Error(d.detail||'Failed');
     explainReportData=d.report;
-    const tabs=el('explain-persona-tabs');tabs.style.display='flex';
-    tabs.querySelectorAll('button').forEach(btn=>{
-      btn.classList.toggle('active',btn.dataset.persona==='all');
-      btn.onclick=function(){tabs.querySelectorAll('button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
-        el('results').innerHTML='';el('results').appendChild(renderExplainReport(explainReportData,btn.dataset.persona));};
-    });
-    el('results').innerHTML='';el('results').appendChild(renderExplainReport(explainReportData,'all'));
+    el('results').innerHTML='';el('results').appendChild(renderExplainReport(explainReportData));
+    if(d.report.warnings&&d.report.warnings.length){
+      const warnDiv=document.createElement('div');
+      warnDiv.style.cssText='background:#332200;border:1px solid #665500;color:#ffcc00;padding:0.5rem 0.75rem;margin-bottom:0.5rem;font-size:0.72rem;border-radius:4px';
+      warnDiv.textContent='\u26a0\ufe0f '+d.report.warnings.join(' ');
+      el('results').prepend(warnDiv);
+    }
+    el('results').scrollIntoView({behavior:'smooth'});
   }catch(e){showError(e.message)}
 }
 function renderExplainSection(s){

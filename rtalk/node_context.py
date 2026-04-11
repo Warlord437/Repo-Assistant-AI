@@ -96,15 +96,21 @@ def explain_file(
     )
 
     try:
-        from rtalk.groq_client import groq_chat
+        from rtalk.groq_client import groq_chat, RateLimitError, APIError
         result = groq_chat(
             ai_api_key,
             [{"role": "user", "content": prompt}],
             max_tokens=250,
         )
         return (result or "", None)
+    except RateLimitError as e:
+        return "", f"Rate limit: {str(e)}"
+    except ValueError as e:
+        return "", f"API key error: {str(e)}"
+    except APIError as e:
+        return "", f"API error: {str(e)}"
     except Exception as e:
-        return "", str(e)
+        return "", f"{type(e).__name__}: {str(e)}"
 
 
 def explain_folder(
@@ -168,12 +174,18 @@ def explain_folder(
     )
 
     try:
-        from rtalk.groq_client import groq_chat
+        from rtalk.groq_client import groq_chat, RateLimitError, APIError
         result = groq_chat(
             ai_api_key,
             [{"role": "user", "content": prompt}],
             max_tokens=250,
         )
         return (result or "", None)
+    except RateLimitError as e:
+        return "", f"Rate limit: {str(e)}"
+    except ValueError as e:
+        return "", f"API key error: {str(e)}"
+    except APIError as e:
+        return "", f"API error: {str(e)}"
     except Exception as e:
-        return "", str(e)
+        return "", f"{type(e).__name__}: {str(e)}"

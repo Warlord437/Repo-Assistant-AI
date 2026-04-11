@@ -109,7 +109,7 @@ def run_guide(
 
     if ai_api_key and ai_api_key.strip():
         from rtalk.answer import GroqAdapter
-        from rtalk.groq_client import groq_chat
+        from rtalk.groq_client import groq_chat, RateLimitError, APIError
 
         llm = GroqAdapter(ai_api_key)
         if llm.is_available():
@@ -134,8 +134,18 @@ def run_guide(
                     steps = _parse_ai_steps(ai_text, evidence)
                     summary = ai_text.split("\n")[0][:200] if ai_text else ""
                     return GuideReport(query=query, steps=steps, summary=summary, is_ai_generated=True)
-            except Exception:
-                pass
+            except RateLimitError as e:
+                import sys
+                print(f"⚠️  Rate limit reached: {str(e)}", file=sys.stderr)
+                print("   Continuing with lexical search results only.", file=sys.stderr)
+            except (ValueError, APIError) as e:
+                import sys
+                print(f"❌ API Error: {str(e)}", file=sys.stderr)
+                print("   Continuing with lexical search results only.", file=sys.stderr)
+            except Exception as e:
+                import sys
+                print(f"❌ Unexpected error: {type(e).__name__}: {str(e)}", file=sys.stderr)
+                print("   Continuing with lexical search results only.", file=sys.stderr)
 
     # Fallback: single step with evidence
     files = list(dict.fromkeys(ev.file_path for ev in evidence))

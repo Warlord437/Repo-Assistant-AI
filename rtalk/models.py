@@ -285,7 +285,9 @@ class ExplainReport:
     architecture_ai_summary: str = ""
     ux_design_overview: str = ""
     ux_design_ai_summary: str = ""
-    role_explanations: dict[str, str] = field(default_factory=dict)  # pm, engineer, ux, researcher
+    role_explanations: dict[str, str] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    ai_explanation: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         def _section_dict(s: ExplainSection) -> dict[str, Any]:
@@ -372,6 +374,8 @@ class ExplainReport:
             "ux_design_overview": self.ux_design_overview,
             "ux_design_ai_summary": self.ux_design_ai_summary,
             "role_explanations": self.role_explanations,
+            "warnings": self.warnings,
+            "ai_explanation": self.ai_explanation,
         }
 
     def render_text(self) -> str:

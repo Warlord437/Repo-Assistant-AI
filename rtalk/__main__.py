@@ -52,6 +52,7 @@ def main(argv: list[str] | None = None) -> None:
     exp = sub.add_parser("explain", help="Generate a structured repo overview")
     exp.add_argument("--index", default=".rtalk/index.jsonl", help="Path to index")
     exp.add_argument("--repo", default=None, help="Repo path for tech stack extraction")
+    exp.add_argument("--ai-key", default=None, help="Groq API key for AI summaries")
 
     # --- guide ---
     gd = sub.add_parser("guide", help="Run a guided investigation (query-driven RAG)")
@@ -108,7 +109,12 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "explain":
         from rtalk.explain import summarize_repo
 
-        report = summarize_repo(args.index, repo_path=args.repo)
+        report = summarize_repo(
+            args.index,
+            repo_path=args.repo,
+            use_ai_summary=bool(args.ai_key),
+            ai_api_key=args.ai_key,
+        )
         print(report.render_text())
 
     elif args.command == "guide":

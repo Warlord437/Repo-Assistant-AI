@@ -358,7 +358,7 @@ def get_top_impact_files(
     ai_summary = ""
     if ai_api_key and ai_api_key.strip() and entries:
         try:
-            from rtalk.groq_client import groq_chat
+            from rtalk.groq_client import groq_chat, RateLimitError, APIError
 
             summary_lines = [
                 f"- {e.file}: risk {e.risk_score:.0f}, {e.dependents_count} dependents, {e.entrypoints_count} entrypoints"
@@ -369,8 +369,15 @@ def get_top_impact_files(
                 f"Write 2-3 sentences summarizing which areas are most critical to change carefully."
             )
             ai_summary = groq_chat(ai_api_key, [{"role": "user", "content": prompt}], max_tokens=150)
-        except Exception:
-            pass
+        except RateLimitError as e:
+            import sys
+            print(f"⚠️  Rate limit reached: {str(e)}", file=sys.stderr)
+        except (ValueError, APIError) as e:
+            import sys
+            print(f"❌ API Error: {str(e)}", file=sys.stderr)
+        except Exception as e:
+            import sys
+            print(f"❌ Unexpected error: {type(e).__name__}: {str(e)}", file=sys.stderr)
 
     return TopImpactReport(
         entries=entries,

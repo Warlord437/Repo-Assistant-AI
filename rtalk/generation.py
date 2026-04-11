@@ -69,12 +69,22 @@ USER QUERY: {query}
 RELEVANT NODE IDS (comma-separated only):"""
 
     try:
-        from rtalk.groq_client import groq_chat
+        from rtalk.groq_client import groq_chat, RateLimitError, APIError
         raw = groq_chat(groq_api_key, [{"role": "user", "content": prompt}], max_tokens=150)
         raw = raw.strip().strip(".").strip()
         node_ids = [x.strip() for x in re.split(r"[,;\s]+", raw) if x.strip()]
         return [n for n in node_ids if n.startswith("n") and n[1:].isdigit()][:5]
-    except Exception:
+    except RateLimitError as e:
+        import sys
+        print(f"⚠️  Rate limit reached: {str(e)}", file=sys.stderr)
+        return []
+    except (ValueError, APIError) as e:
+        import sys
+        print(f"❌ API Error: {str(e)}", file=sys.stderr)
+        return []
+    except Exception as e:
+        import sys
+        print(f"❌ Unexpected error: {type(e).__name__}: {str(e)}", file=sys.stderr)
         return []
 
 

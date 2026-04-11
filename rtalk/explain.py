@@ -700,12 +700,30 @@ def _build_domains(
     return domains
 
 
+_rate_limit_warnings: list[str] = []
+
 def _call_groq(api_key: str, prompt: str, max_tokens: int = 150) -> str:
-    """Call Groq API. Returns empty string on failure."""
+    """Call Groq API with automatic retry on rate limits. Returns empty string on failure."""
     try:
-        from rtalk.groq_client import groq_chat
+        from rtalk.groq_client import groq_chat, RateLimitError, APIError
+
         return groq_chat(api_key, [{"role": "user", "content": prompt}], max_tokens=max_tokens)
-    except Exception:
+    except RateLimitError as e:
+        import sys
+        _rate_limit_warnings.append(str(e))
+        print(f"⚠️  API Rate Limit (after retries): {str(e)}", file=sys.stderr)
+        return ""
+    except ValueError as e:
+        import sys
+        print(f"❌ API Key Error: {str(e)}", file=sys.stderr)
+        return ""
+    except APIError as e:
+        import sys
+        print(f"❌ API Error: {str(e)}", file=sys.stderr)
+        return ""
+    except Exception as e:
+        import sys
+        print(f"❌ Unexpected error calling Groq API: {type(e).__name__}: {str(e)}", file=sys.stderr)
         return ""
 
 
@@ -733,72 +751,69 @@ def _toc_to_compact_json(nodes: list, max_depth: int = 3, max_chars: int = 3500)
     return s
 
 
-_ROLE_PROMPTS: dict[str, str] = {
-    "pm": (
-        "You are explaining this codebase to a Product Manager. Focus on: features, capabilities, "
-        "user-facing value, what the product does, key areas for product decisions. "
-        "No code details. 2-4 sentences."
-    ),
-    "engineer": (
-        "You are explaining this codebase to a Software Engineer. Focus on: architecture, "
-        "tech stack, how to run it, entry points, key modules, where to start coding. "
-        "2-4 sentences."
-    ),
-    "ux": (
-        "You are explaining this codebase to a UX Designer. Focus on: user flows, screens, "
-        "interaction patterns, UI areas, what users interact with. No code. 2-4 sentences."
-    ),
-    "researcher": (
-        "You are explaining this codebase to a Researcher. Focus on: structure, methodology, "
-        "data flow, how components connect, research-relevant areas. 2-4 sentences."
-    ),
-}
-
-
-def _generate_role_explanations(
+def _generate_detailed_explanation(
     report: ExplainReport,
     records: list[IndexRecord],
     api_key: str,
-) -> dict[str, str]:
-    """Generate AI summaries tailored to each persona (pm, engineer, ux, researcher)."""
+) -> str:
+    """Generate one comprehensive AI explanation covering the entire codebase."""
     toc = build_toc(records)
-    toc_json = _toc_to_compact_json(toc)
+    toc_json = _toc_to_compact_json(toc, max_chars=4000)
 
-    report_context_parts: list[str] = []
-    report_context_parts.append(f"What: {report.what.body[:300]}")
-    report_context_parts.append(f"How to run: {report.how_to_run.body[:200]}")
+    ctx: list[str] = []
+    ctx.append(f"## What this repo is\n{report.what.body[:400]}")
+    ctx.append(f"## How to run\n{report.how_to_run.body[:300]}")
     if report.directories:
-        dirs = "; ".join(f"{d.path}/ ({d.file_count})" for d in report.directories[:8])
-        report_context_parts.append(f"Directories: {dirs}")
+        dirs = "\n".join(f"- {d.path}/ ({d.file_count} files) — {d.description}" for d in report.directories[:10])
+        ctx.append(f"## Directories\n{dirs}")
     if report.entrypoints:
-        eps = "; ".join(f"{e.kind} in {e.file_path}" for e in report.entrypoints[:6])
-        report_context_parts.append(f"Entry points: {eps}")
+        eps = "\n".join(f"- [{e.kind}] {e.file_path}:{e.line} — {e.description}" for e in report.entrypoints[:8])
+        ctx.append(f"## Entry points\n{eps}")
     if report.domains:
-        domains = "; ".join(f"{d.path}: {d.summary[:80]}" for d in report.domains[:6])
-        report_context_parts.append(f"Domains: {domains}")
+        doms = "\n".join(
+            f"- {d.path}/ ({d.file_count} files): {d.summary[:120]}"
+            + (f" | imports from: {', '.join(d.imports_from)}" if d.imports_from else "")
+            + (f" | imported by: {', '.join(d.imported_by)}" if d.imported_by else "")
+            for d in report.domains[:10]
+        )
+        ctx.append(f"## Domains / folders\n{doms}")
     if report.architecture_narrative:
-        report_context_parts.append(f"Architecture: {report.architecture_narrative[:200]}")
-    if report.at_a_glance:
-        report_context_parts.append(
-            f"At a glance: {report.at_a_glance.file_count} files, "
-            f"{report.at_a_glance.entry_point_count} entry points"
-        )
+        ctx.append(f"## Architecture\n{report.architecture_narrative[:500]}")
+    if report.architecture_layers:
+        layers = "\n".join(f"- {l.name}: {', '.join(l.folders)}" for l in report.architecture_layers)
+        ctx.append(f"## Architecture layers\n{layers}")
+    if report.tech_stack:
+        ctx.append(f"## Tech stack\n{', '.join(report.tech_stack[:12])}")
+    if report.key_capabilities:
+        caps = "\n".join(f"- {c}" for c in report.key_capabilities[:8])
+        ctx.append(f"## Key capabilities\n{caps}")
+    if report.start_here:
+        recs = "\n".join(f"{i+1}. {s.title} — {s.body}" for i, s in enumerate(report.start_here[:8]))
+        ctx.append(f"## Suggested reading order\n{recs}")
 
-    report_context = "\n".join(report_context_parts)
+    report_context = "\n\n".join(ctx)
 
-    role_explanations: dict[str, str] = {}
-    for role, role_instruction in _ROLE_PROMPTS.items():
-        prompt = (
-            f"{role_instruction}\n\n"
-            f"TOC (codebase structure):\n{toc_json}\n\n"
-            f"Report context:\n{report_context}\n\n"
-            f"Write a brief, tailored explanation for the {role.upper()} role. "
-            f"Use ONLY the information above. Be specific to this repo."
-        )
-        result = _call_groq(api_key, prompt, max_tokens=200)
-        if result and len(result) < 500:
-            role_explanations[role] = result.strip()
-    return role_explanations
+    prompt = (
+        "You are a senior engineer writing a detailed knowledge-transfer document for a codebase.\n\n"
+        "Below is structured data extracted from the repository index. Use ALL of it to write a "
+        "comprehensive explanation that anyone (engineer, PM, researcher, designer) can reference.\n\n"
+        "Cover these topics in order:\n"
+        "1. **What this project does** — purpose, key features, value proposition\n"
+        "2. **How to run it** — setup, install, launch commands\n"
+        "3. **Architecture overview** — how the codebase is organized, what each major folder/module does\n"
+        "4. **Key components & how they connect** — dependency flow, which modules are foundational vs consumers\n"
+        "5. **Entry points** — where does execution start, what APIs/CLIs exist\n"
+        "6. **Where to start reading** — recommended file order for someone new\n\n"
+        "Rules:\n"
+        "- Be SPECIFIC to this repo. Reference actual file names, folders, and modules.\n"
+        "- Use markdown formatting (headers, bullets, bold) for readability.\n"
+        "- Be thorough but concise — aim for a complete reference, not a summary.\n"
+        "- Use ONLY the information provided below. Do not invent features.\n\n"
+        f"TOC (codebase structure):\n{toc_json}\n\n"
+        f"Extracted data:\n{report_context}"
+    )
+
+    return _call_groq(api_key, prompt, max_tokens=1024)
 
 
 def _enhance_domains_with_ai(
@@ -808,7 +823,7 @@ def _enhance_domains_with_ai(
 ) -> list[DomainInfo]:
     """Optionally enhance domain summaries using Groq API. Falls back to original on failure."""
     enhanced: list[DomainInfo] = []
-    for d in domains[:10]:
+    for d in domains[:5]:
         chunks: list[str] = []
         for r in records:
             if r.record_kind != RecordKind.FILE_CHUNK or not r.chunk:
@@ -853,81 +868,18 @@ def _enhance_domains_with_ai(
             ))
         else:
             enhanced.append(d)
-    return enhanced + domains[10:]
+    return enhanced + domains[5:]
 
 
-def _enhance_sections_with_ai(
+def _enhance_with_ai(
     report: ExplainReport,
+    records: list[IndexRecord],
     api_key: str,
 ) -> ExplainReport:
-    """Add AI summaries for each section. Returns report with ai_summary fields populated."""
-    from rtalk.groq_client import groq_chat
-
-    def _summarize(prompt: str, max_tokens: int = 120) -> str:
-        try:
-            return groq_chat(api_key, [{"role": "user", "content": prompt}], max_tokens=max_tokens)
-        except Exception:
-            return ""
-
-    what_prompt = (
-        f"Summarize in one sentence (max 80 chars) what this repo is: {report.what.body[:300]}"
-    )
-    ai_what = _summarize(what_prompt)
-    if ai_what:
-        report.what.ai_summary = ai_what
-
-    how_prompt = (
-        f"In one sentence (max 80 chars), how do you run this project?:\n{report.how_to_run.body[:400]}"
-    )
-    ai_how = _summarize(how_prompt)
-    if ai_how:
-        report.how_to_run.ai_summary = ai_how
-
-    if report.directories:
-        dirs_text = "\n".join(f"{d.path}/ ({d.file_count} files) - {d.description}" for d in report.directories[:8])
-        dirs_prompt = f"In one sentence (max 80 chars), how is this codebase organized?:\n{dirs_text}"
-        report.directories_ai_summary = _summarize(dirs_prompt)
-
-    if report.entrypoints:
-        eps_text = "\n".join(f"[{e.kind}] {e.file_path}" for e in report.entrypoints[:6])
-        eps_prompt = f"In one sentence (max 80 chars), how do users interact with this project?:\n{eps_text}"
-        report.entrypoints_ai_summary = _summarize(eps_prompt)
-
-    if report.architecture_layers or report.architecture_narrative:
-        arch_text = report.architecture_narrative or " ".join(
-            f"{l.name}: {', '.join(l.folders)}" for l in report.architecture_layers
-        )
-        arch_prompt = (
-            "Given this codebase architecture, write 2-3 sentences explaining how components connect. "
-            "Be specific: which modules are the foundation (others depend on them)? "
-            "Which are consumers? What is the main dependency flow? "
-            "Do NOT say generic things like 'they import each other'.\n\n"
-            f"Architecture:\n{arch_text[:600]}"
-        )
-        report.architecture_ai_summary = _summarize(arch_prompt, max_tokens=200)
-
-    ux_eps = [e for e in report.entrypoints if e.kind in ("fastapi_app", "flask_app")]
-    ux_dirs = [d for d in report.directories if d.path.lower() in ("web", "frontend", "app", "ui")]
-    if ux_eps or ux_dirs or report.at_a_glance:
-        ux_parts = []
-        if ux_eps:
-            ux_parts.append("User-facing: " + ", ".join(f"{e.kind} in {e.file_path}" for e in ux_eps[:4]))
-        if ux_dirs:
-            ux_parts.append("UI areas: " + ", ".join(f"{d.path}/ ({d.file_count} files)" for d in ux_dirs[:4]))
-        if report.at_a_glance and report.at_a_glance.user_facing_count:
-            ux_parts.append(f"{report.at_a_glance.user_facing_count} user-facing entry points")
-        ux_context = "; ".join(ux_parts)[:500]
-        ux_prompt = (
-            f"For a UX designer (NO code, NO technical details). "
-            f"Describe design ideas: user flows, screens, interaction patterns. "
-            f"2-3 sentences max. Context: {ux_context}"
-        )
-        report.ux_design_ai_summary = _summarize(ux_prompt)
-
-    for s in report.start_here[:5]:
-        s_prompt = f"In one sentence (max 60 chars), why read this? {s.title}: {s.body[:200]}"
-        s.ai_summary = _summarize(s_prompt)
-
+    """Generate one detailed AI explanation for the entire report."""
+    explanation = _generate_detailed_explanation(report, records, api_key)
+    if explanation:
+        report.ai_explanation = explanation
     return report
 
 
@@ -1142,9 +1094,6 @@ def summarize_repo(
     domains = _build_domains(all_files, folder_graph, layers, records, graph)
     architecture_narrative = _build_architecture_narrative(layers, folder_graph)
 
-    if use_ai_summary and ai_api_key:
-        domains = _enhance_domains_with_ai(domains, records, ai_api_key)
-
     ux_design_overview = _build_ux_design_overview(entrypoints, directories, at_a_glance)
 
     report = ExplainReport(
@@ -1164,7 +1113,20 @@ def summarize_repo(
     )
 
     if use_ai_summary and ai_api_key:
-        report = _enhance_sections_with_ai(report, ai_api_key)
-        report.role_explanations = _generate_role_explanations(report, records, ai_api_key)
+        _rate_limit_warnings.clear()
+        report = _enhance_with_ai(report, records, ai_api_key)
+        if _rate_limit_warnings:
+            is_daily = any("tokens per day" in w.lower() or "tpd" in w.lower() for w in _rate_limit_warnings)
+            if is_daily:
+                report.warnings.append(
+                    "Daily token limit reached on your Groq API key. "
+                    "AI explanation will be available when the daily quota resets (usually within the hour). "
+                    "Try again later, or upgrade your Groq plan."
+                )
+            else:
+                report.warnings.append(
+                    "Rate limited by Groq API. Wait ~30 seconds and re-run, or upgrade your Groq plan."
+                )
+            _rate_limit_warnings.clear()
 
     return report

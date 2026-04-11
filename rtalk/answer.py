@@ -49,13 +49,23 @@ class GroqAdapter(LLMAdapter):
         if not self.api_key:
             return ""
         try:
-            from rtalk.groq_client import groq_chat
+            from rtalk.groq_client import groq_chat, RateLimitError, APIError
             return groq_chat(
                 self.api_key,
                 [{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
             )
-        except Exception:
+        except RateLimitError as e:
+            import sys
+            print(f"⚠️  Rate limit reached: {str(e)}", file=sys.stderr)
+            return ""
+        except (ValueError, APIError) as e:
+            import sys
+            print(f"❌ API Error: {str(e)}", file=sys.stderr)
+            return ""
+        except Exception as e:
+            import sys
+            print(f"❌ Unexpected error: {type(e).__name__}: {str(e)}", file=sys.stderr)
             return ""
 
     def is_available(self) -> bool:
