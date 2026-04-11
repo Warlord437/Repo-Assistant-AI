@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 
@@ -153,7 +154,9 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "serve":
         import uvicorn
 
-        uvicorn.run("rtalk.server:app", host="127.0.0.1", port=8000, reload=True)
+        port = int(os.environ.get("PORT", 8000))
+        host = os.environ.get("HOST", "127.0.0.1")
+        uvicorn.run("rtalk.server:app", host=host, port=port, reload=(host == "127.0.0.1"))
 
     else:
         parser.print_help()
